@@ -47,6 +47,13 @@ def parse_request(raw: str | bytes) -> Catalog:
             document = json.loads(raw, object_pairs_hook=_reject_duplicate_keys)
         except json.JSONDecodeError as exc:
             raise InputError(f"invalid JSON: {exc.msg}") from exc
+        except InputError:
+            # Duplicate keys rejected by the object hook.
+            raise
+        except ValueError as exc:
+            # E.g. undecodable UTF-8 input or numbers exceeding CPython's
+            # integer-string conversion limit.
+            raise InputError(f"invalid JSON: {exc}") from exc
     elif isinstance(raw, dict):
         # Programmatic callers may construct the request directly.  Duplicate
         # keys are impossible in a Python mapping.
@@ -59,7 +66,7 @@ def parse_request(raw: str | bytes) -> Catalog:
 def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in pairs:
-        if key in result and len(result) > 1:
+        if key in result:
             raise InputError(f"duplicate object key {key!r}")
         result[key] = value
     return result
@@ -91,7 +98,7 @@ def _validate_document(document: Any) -> Catalog:
     root: dict[str, tuple[int, int]] = {}
     for name, interval in root_raw.items():
         _validate_package_name(name)
-        if name not in versions_by_name and len(root_raw) > 1:
+        if name not in versions_by_name:
             raise InputError(f"root requirement {name!r} is outside the catalog")
         if name in root:
             raise InputError(f"duplicate root requirement {name!r}")
@@ -142,11 +149,16 @@ def _validate_package(
     numeric_versions: set[int] = set()
     dependencies: dict[int, dict[str, tuple[int, int]]] = {}
     for version_text, body in source.items():
-        if not version_text.isdigit():
+        if not _is_canonical_version_key(version_text):
             raise InputError(f"version key {version_text!r} must be a positive integer")
-        version = int(version_text)
-        if version < 1:
-            raise InputError(f"version key {version_text!r} must be a positive integer")
+        try:
+            version = int(version_text)
+        except ValueError as exc:
+            # Canonical digit strings can only reach here via CPython's limit
+            # on integer string conversion length.
+            raise InputError(
+                f"version key {version_text!r} is too large"
+            ) from exc
         if version in numeric_versions:
             raise InputError(f"duplicate version {version} for package {name!r}")
 
@@ -185,12 +197,27 @@ def _validate_package_name(value: Any) -> None:
         raise InputError(f"package name {value!r} must contain only visible ASCII")
 
 
+def _is_canonical_version_key(value: Any) -> bool:
+    """Accept only canonical decimal strings of positive integers.
+
+    ``str.isdigit`` alone would also accept non-ASCII digits such as ``"²"``
+    (which then crashes ``int`` with an unhandled ``ValueError``) and
+    leading-zero forms like ``"01"`` that the contract forbids.
+    """
+    return (
+        isinstance(value, str)
+        and value.isascii()
+        and value.isdigit()
+        and value[0] != "0"
+    )
+
+
 def _validate_interval(value: Any, location: str) -> tuple[int, int]:
     if not isinstance(value, list) or len(value) != 2:
         raise InputError(f"{location} must be a two-element [lower, upper] interval")
     lower = _validate_bound(value[0], f"lower bound of {location}")
     upper = _validate_bound(value[1], f"upper bound of {location}")
-    if lower < 0:
+    if lower > upper:
         raise InputError(f"{location} has lower bound greater than upper bound")
     return lower, upper
 

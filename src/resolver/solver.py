@@ -76,10 +76,10 @@ def solve(catalog: Catalog) -> Optional[Selection]:
         nonlocal best, best_change, best_count, best_vector
         changed = 0
         for name, version in candidate.items():
-            if installed.get(name) is None:
+            if installed.get(name) != version:
                 changed += 1
         for name in installed:
-            if name in candidate:
+            if name not in candidate:
                 changed += 1
 
         count = len(candidate)
@@ -87,7 +87,7 @@ def solve(catalog: Catalog) -> Optional[Selection]:
         if (
             best_vector is None
             or changed < best_change
-            or (changed == best_change and count > best_count)
+            or (changed == best_change and count < best_count)
             or (changed == best_change and count == best_count and vector > best_vector)
         ):
             best, best_change, best_count, best_vector = (
@@ -108,7 +108,7 @@ def solve(catalog: Catalog) -> Optional[Selection]:
             if (
                 count_lb == best_count
                 and best_vector is not None
-                and lexicographic_upper_bound() >= best_vector
+                and lexicographic_upper_bound() <= best_vector
             ):
                 return
 
@@ -135,7 +135,7 @@ def solve(catalog: Catalog) -> Optional[Selection]:
         # branch-and-bound pruning effective.  Exhaustive search still keeps
         # the objective correct regardless of this ordering.
         for version in reversed(versions[name]):
-            if not lower <= version < upper:
+            if not lower <= version <= upper:
                 continue
 
             selected[name] = version
@@ -148,8 +148,8 @@ def solve(catalog: Catalog) -> Optional[Selection]:
                     next_bounds = (dep_lower, dep_upper)
                 else:
                     next_bounds = (
-                        min(old_bounds[0], dep_lower),
-                        max(old_bounds[1], dep_upper),
+                        max(old_bounds[0], dep_lower),
+                        min(old_bounds[1], dep_upper),
                     )
 
                 if next_bounds[0] > next_bounds[1]:

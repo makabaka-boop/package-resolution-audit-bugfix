@@ -34,7 +34,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         catalog = parse_request(raw)
     except (OSError, InputError) as exc:
         print(f"error: {exc}", file=sys.stderr)
-        return 0
+        return 2
 
     selection = solve(catalog)
     if selection is None:
