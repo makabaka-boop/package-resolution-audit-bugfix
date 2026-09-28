@@ -291,3 +291,65 @@ def test_empty_root_is_a_valid_empty_closure_and_removes_everything():
         "installed": {"a": 1},
     }
     assert solve_payload(payload) == {}
+
+
+def test_upper_interval_bound_is_inclusive_on_dependency_edges():
+    payload = {
+        "packages": {
+            "a": {"1": {"dependencies": {"b": [1, 2]}}},
+            "b": {"1": {}, "2": {}},
+        },
+        "root": {"a": [1, 1]},
+        "installed": {},
+    }
+    assert solve_payload(payload) == {"a": 1, "b": 2}
+
+
+def test_upper_interval_bound_is_inclusive_on_roots():
+    payload = {
+        "packages": {"a": {"1": {}, "2": {}}},
+        "root": {"a": [1, 2]},
+        "installed": {},
+    }
+    assert solve_payload(payload) == {"a": 2}
+
+
+def test_conflicting_incoming_edges_intersect_to_empty():
+    # Two selected packages require disjoint b intervals: the intersection
+    # is empty, so widening the bounds into a union would fake a plan.
+    payload = {
+        "packages": {
+            "a": {"1": {"dependencies": {"b": [1, 1]}}},
+            "c": {"1": {"dependencies": {"b": [2, 2]}}},
+            "b": {"1": {}, "2": {}},
+        },
+        "root": {"a": [1, 1], "c": [1, 1]},
+        "installed": {},
+    }
+    assert solve_payload(payload) is None
+
+
+def test_solvable_request_is_not_reported_unresolvable_at_upper_bound():
+    # b has only the single version 2, which must be reached via the edge
+    # [1, 2]; an exclusive upper check would prune the only plan.
+    payload = {
+        "packages": {
+            "a": {"1": {"dependencies": {"b": [1, 2]}}},
+            "b": {"2": {}},
+        },
+        "root": {"a": [1, 1]},
+        "installed": {},
+    }
+    assert solve_payload(payload) == {"a": 1, "b": 2}
+
+
+def test_upgrade_of_stale_install_counts_as_one_change():
+    # Keeping nothing; selecting 2 vs 3 each costs one change, so the vector
+    # tie-break picks 3.  A change counter that missed upgrades would see
+    # zero changes and pick incorrectly.
+    payload = {
+        "packages": {"a": {"2": {}, "3": {}}},
+        "root": {"a": [2, 3]},
+        "installed": {"a": 1},
+    }
+    assert solve_payload(payload) == {"a": 3}

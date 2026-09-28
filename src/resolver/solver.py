@@ -74,20 +74,20 @@ def solve(catalog: Catalog) -> Optional[Selection]:
 
     def record(candidate: Selection) -> None:
         nonlocal best, best_change, best_count, best_vector
-        changed = 0
-        for name, version in candidate.items():
-            if installed.get(name) is None:
-                changed += 1
-        for name in installed:
-            if name in candidate:
-                changed += 1
+        # A selected version changes when it is newly installed or differs from
+        # the installed one; an installed package missing from the closure is a
+        # removal.  Stale installed versions are covered by the mismatch test.
+        changed = sum(
+            1 for name, version in candidate.items() if installed.get(name) != version
+        )
+        changed += sum(1 for name in installed if name not in candidate)
 
         count = len(candidate)
         vector = tuple(candidate.get(name, 0) for name in names)
         if (
             best_vector is None
             or changed < best_change
-            or (changed == best_change and count > best_count)
+            or (changed == best_change and count < best_count)
             or (changed == best_change and count == best_count and vector > best_vector)
         ):
             best, best_change, best_count, best_vector = (
@@ -108,7 +108,7 @@ def solve(catalog: Catalog) -> Optional[Selection]:
             if (
                 count_lb == best_count
                 and best_vector is not None
-                and lexicographic_upper_bound() >= best_vector
+                and lexicographic_upper_bound() <= best_vector
             ):
                 return
 
@@ -135,7 +135,7 @@ def solve(catalog: Catalog) -> Optional[Selection]:
         # branch-and-bound pruning effective.  Exhaustive search still keeps
         # the objective correct regardless of this ordering.
         for version in reversed(versions[name]):
-            if not lower <= version < upper:
+            if not lower <= version <= upper:
                 continue
 
             selected[name] = version
@@ -147,25 +147,25 @@ def solve(catalog: Catalog) -> Optional[Selection]:
                 if old_bounds is None:
                     next_bounds = (dep_lower, dep_upper)
                 else:
+                    # Every incoming edge must accept the chosen version, so the
+                    # constraints accumulate as an intersection, not a union.
                     next_bounds = (
-                        min(old_bounds[0], dep_lower),
-                        max(old_bounds[1], dep_upper),
+                        max(old_bounds[0], dep_lower),
+                        min(old_bounds[1], dep_upper),
                     )
 
                 if next_bounds[0] > next_bounds[1]:
                     consistent = False
-                elif dependency in selected and not (
+                    break
+                if dependency in selected and not (
                     next_bounds[0] <= selected[dependency] <= next_bounds[1]
                 ):
                     consistent = False
+                    break
 
                 if old_bounds != next_bounds:
                     undo.append((dependency, old_bounds))
-                    if consistent:
-                        bounds[dependency] = next_bounds
-
-                if not consistent:
-                    break
+                    bounds[dependency] = next_bounds
 
             if consistent:
                 dfs()

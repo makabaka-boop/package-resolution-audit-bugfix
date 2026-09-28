@@ -68,6 +68,15 @@ def test_reject_non_integer_or_non_positive_version_key():
             parse_request(json.dumps(payload))
 
 
+def test_reject_non_canonical_version_key():
+    # Leading zeros and surrounding whitespace are not the canonical decimal
+    # form of a positive integer.
+    for bad_key in ["01", "00", " 1", "1 "]:
+        payload = valid_payload(packages={"a": {bad_key: {}}}, root={}, installed={})
+        with pytest.raises(InputError):
+            parse_request(json.dumps(payload))
+
+
 def test_reject_non_ascii_package_name():
     payload = valid_payload(
         packages={"ä": {"1": {}}},
@@ -134,3 +143,33 @@ def test_reject_duplicate_json_object_keys():
     """
     with pytest.raises(InputError):
         parse_request(raw)
+
+
+def test_reject_duplicate_key_in_single_key_object():
+    # The duplicate must be caught even when it is the only key present.
+    raw = '{"packages": {"a": {"1": {}, "1": {}}}, "root": {}, "installed": {}}'
+    with pytest.raises(InputError):
+        parse_request(raw)
+
+
+def test_reject_duplicate_top_level_key():
+    raw = """
+    {
+      "packages": {"a": {"1": {}}},
+      "root": {},
+      "installed": {},
+      "root": {}
+    }
+    """
+    with pytest.raises(InputError):
+        parse_request(raw)
+
+
+def test_reject_reversed_dependency_interval():
+    payload = valid_payload(
+        packages={"a": {"1": {"dependencies": {"b": [2, 1]}}}},
+        root={"a": [1, 1]},
+        installed={},
+    )
+    with pytest.raises(InputError):
+        parse_request(json.dumps(payload))

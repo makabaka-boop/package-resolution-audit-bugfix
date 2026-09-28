@@ -58,3 +58,31 @@ def test_cli_rejects_bad_json_with_nonzero_exit(tmp_path):
     assert result.returncode == 2
     assert result.stdout == ""
     assert result.stderr.startswith("error: ")
+
+
+def test_cli_rejects_contract_violation_with_exit_code_two(tmp_path):
+    # A reversed interval is a contract error, not an unresolvable request:
+    # the error goes to stderr and the process exits 2 with no plan on stdout.
+    payload = {
+        "packages": {"a": {"1": {}}},
+        "root": {"a": [2, 1]},
+        "installed": {},
+    }
+    result = run_cli(payload, tmp_path)
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert result.stderr.startswith("error: ")
+
+
+def test_cli_rejects_root_outside_catalog_without_crashing(tmp_path):
+    # Previously a lone out-of-catalog root escaped validation and made the
+    # solver raise a raw KeyError; the CLI must report it cleanly instead.
+    payload = {
+        "packages": {"a": {"1": {}}},
+        "root": {"missing": [1, 1]},
+        "installed": {},
+    }
+    result = run_cli(payload, tmp_path)
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "Traceback" not in result.stderr

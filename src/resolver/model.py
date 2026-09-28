@@ -5,11 +5,11 @@ The accepted request shape is::
     {
       "packages": {
         "name": {
-          "1": {"dependencies": {"other": [">=1", "<=3"]}},
+          "1": {"dependencies": {"other": [1, 3]}},
           "2": {}
         }
       },
-      "root": {"name": [">=1", "<=2"]},
+      "root": {"name": [1, 2]},
       "installed": {"name": 2}
     }
 
@@ -20,9 +20,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import re
 from typing import Any
 
 from .errors import InputError
+
+# Canonical decimal encoding of an unsigned positive integer: no sign, no
+# leading zero, no surrounding whitespace.
+_VERSION_RE = re.compile(r"[1-9][0-9]*")
 
 # dependencies[package][version] = {dependency_name: (lower, upper)}
 Dependencies = dict[str, dict[int, dict[str, tuple[int, int]]]]
@@ -59,7 +64,7 @@ def parse_request(raw: str | bytes) -> Catalog:
 def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in pairs:
-        if key in result and len(result) > 1:
+        if key in result:
             raise InputError(f"duplicate object key {key!r}")
         result[key] = value
     return result
@@ -91,7 +96,7 @@ def _validate_document(document: Any) -> Catalog:
     root: dict[str, tuple[int, int]] = {}
     for name, interval in root_raw.items():
         _validate_package_name(name)
-        if name not in versions_by_name and len(root_raw) > 1:
+        if name not in versions_by_name:
             raise InputError(f"root requirement {name!r} is outside the catalog")
         if name in root:
             raise InputError(f"duplicate root requirement {name!r}")
@@ -142,11 +147,9 @@ def _validate_package(
     numeric_versions: set[int] = set()
     dependencies: dict[int, dict[str, tuple[int, int]]] = {}
     for version_text, body in source.items():
-        if not version_text.isdigit():
+        if not isinstance(version_text, str) or not _VERSION_RE.fullmatch(version_text):
             raise InputError(f"version key {version_text!r} must be a positive integer")
         version = int(version_text)
-        if version < 1:
-            raise InputError(f"version key {version_text!r} must be a positive integer")
         if version in numeric_versions:
             raise InputError(f"duplicate version {version} for package {name!r}")
 
@@ -190,7 +193,7 @@ def _validate_interval(value: Any, location: str) -> tuple[int, int]:
         raise InputError(f"{location} must be a two-element [lower, upper] interval")
     lower = _validate_bound(value[0], f"lower bound of {location}")
     upper = _validate_bound(value[1], f"upper bound of {location}")
-    if lower < 0:
+    if lower > upper:
         raise InputError(f"{location} has lower bound greater than upper bound")
     return lower, upper
 
